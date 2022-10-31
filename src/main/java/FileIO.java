@@ -5,6 +5,7 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.List;
 
 public class FileIO {
     private String x;
@@ -14,9 +15,10 @@ public class FileIO {
 
     }
 
-    public void createFile(int xx, ArrayList<String> regSeq) {
+    public void createFile(String xx, List<String> regSeq) {
         try {
-            FileChannel rwChannel = new RandomAccessFile(x+"\\docs"+xx+".txt", "rw").getChannel();
+            FileChannel rwChannel = new RandomAccessFile(x+"\\"+xx, "rw").getChannel();
+            rwChannel.truncate(0);
 
             for (String reg : regSeq) {
                 String out = reg+"\n";

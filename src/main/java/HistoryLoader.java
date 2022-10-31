@@ -1,10 +1,13 @@
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
+
 import java.sql.*;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 
 public class HistoryLoader {
 
+    private final String cTypes = "documentType in ('beck-pl-analiza','beck-pl-bib','beck-pl-c','beck-pl-csys','beck-pl-infor','beck-pl-ius','beck-pl-jour','beck-pl-kierunek','beck-pl-mono','beck-pl-news','beck-pl-nius','beck-pl-porad','beck-pl-rz','beck-pl-sys')";
     Connection connReport;
     Connection connMip;
 
@@ -12,6 +15,8 @@ public class HistoryLoader {
     final int shortClick=5000;
     final int registerSeqTresh=3;
     final int exportsInSeqTresh=30;
+
+
 
     int sessions=0;
     int toFewDocuments=0;
@@ -38,28 +43,29 @@ public class HistoryLoader {
         connReport = connecter("jaworskim", "jaworskim", "legalis_report");
         connMip = connecter("jaworskim", "jaworskim", "mip");
 
-        fileIo = new FileIO("d:\\temp");
-        uniqIds = new UniqueIds(connReport);
+        fileIo = new FileIO("c:\\temp");
+        uniqIds = new UniqueIds(connReport, connMip);
 
-
-        for (int xx = 2016; xx <= 2018; xx++) {
+        //for (int xx = 2016; xx <= 2018; xx++) {
+        for (int xx = 2021; xx <= 2021; xx++) {
             System.out.println("year "+xx);
-            String sql = " from get where request_type_id=8 and year(date)="+xx;
+            String sql = " from action_test where "+cTypes+" and timestamp>'2021-9-9' ";
             if (xx<2018) {
-                sql = " from get_history4 where request_type_id=8 and year(date)="+xx;
+                sql = " from get_history4 where "+cTypes+" and year(timestamp)="+xx;
             }
-            String order = " order by session_id, date";
-            String select = "select id1, id2, date, session_id, type, document ";
+            String order = " order by sessionId, timestamp";
+            String select = "select documentId, productId, timestamp, sessionId, type, documentType  ";
 
-            PreparedStatement st = connReport.prepareStatement("select count(*) "+sql);
+            //PreparedStatement st = connReport.prepareStatement("select count(*) "+sql);
+            //ResultSet rs = st.executeQuery();
+            //rs.next();
+            //int x = rs.getInt(1);
+            System.out.println(select+sql+order);
+            PreparedStatement st = connReport.prepareStatement(select+sql+order);
             ResultSet rs = st.executeQuery();
-            rs.next();
-            int x = rs.getInt(1);
-            st = connReport.prepareStatement(select+sql+order);
-            rs = st.executeQuery();
 
-            processRows(x, rs);
-            fileIo.createFile(xx, regSeq);
+            processRows(Integer.MAX_VALUE, rs);
+            //fileIo.createFile(xx, regSeq);
 
             System.out.println("sessions: "+sessions);
             System.out.println("related: "+regSeq.size());
@@ -83,7 +89,7 @@ public class HistoryLoader {
         int i=0;
 
 
-        IntArrayList corr = new IntArrayList();
+        LongArrayList corr = new LongArrayList();
         SimpleDateFormat formatter = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss");
 
 
@@ -92,12 +98,12 @@ public class HistoryLoader {
                 if (i++ % (xx / 10) == 0) {
                     System.out.println("["+ formatter.format(new java.util.Date()) +" "+ (100 * i  / xx) + "%]");
                 }
-                long currStamp = rs.getDate("date").getTime();
+                long currStamp = rs.getDate("timestamp").getTime();
                 boolean skipLast = false;
                 if (currSessionId == -1) {
-                    currSessionId = rs.getInt("session_id");
+                    currSessionId = rs.getInt("sessionId");
                     sessions++;
-                } else if (currSessionId == rs.getInt("session_id")) {
+                } else if (currSessionId == rs.getInt("sessionId")) {
                     if (currStamp - milisecs < sessionTreshold) {
                         if ((currStamp - milisecs < shortClick)) {
                             skipLast = true;
@@ -109,21 +115,20 @@ public class HistoryLoader {
                     }
                 } else {
                     flushCoor(corr);
-                    currSessionId = rs.getInt("session_id");
+                    currSessionId = rs.getInt("sessionId");
                     sessions++;
                 }
                 milisecs = currStamp;
 
 
-                String adrr1 = rs.getString("document").toUpperCase();
-                String[] adrr2 = adrr1.split("\\.");
+                String adrrDoc = rs.getString("documentId").toUpperCase();
+                String adrrProd = rs.getString("productId").toUpperCase();
+
+
                 try {
-                    int uniqId = 0;
+                    long uniqId = 0;
                     boolean typeExport= false;
-                    int id1 = getId1(rs);
-                    int id2= getId2(rs, id1);
-                    String legalisName=calcLegalisName(adrr1, adrr2, id1, id2);
-                    uniqId = uniqIds.get(id1, id2, legalisName);
+                    uniqId = uniqIds.get(adrrDoc, adrrProd, rs.getString("documentType"));
                     typeExport = isExport(rs);
 
                     if (!skipLast) {
@@ -133,7 +138,7 @@ public class HistoryLoader {
                     }
 
                 } catch (Exception e) {
-                    System.out.println("err "+adrr1+", "+e.getMessage());
+                    System.out.println("err "+adrrDoc+", "+e.getMessage());
                 }
 
             } catch (Exception e) {
@@ -153,55 +158,9 @@ public class HistoryLoader {
         }
     }
 
-    private String calcLegalisName(String adrr1, String[] adrr2, int id1, int id2) throws Exception {
-        try {
-            if (adrr1.contains(".PAP.")) {
-                if (adrr2.length==5) {
-                    return adrr2[0]+"."+adrr2[1]+".ACT."+adrr2[2]+"."+adrr2[3]+"."+adrr2[4];
-                } else {
-                    return adrr1;
-                }
-            } else if (adrr2.length>2 && id2>-1) {
-                return "BOOK."+id2;
-            } else if (adrr2.length>2 && id2==-1) {
-                return "BOOK."+id1;
-            } else if (id1>-1 && id2>-1) {
-                return "BOOK."+id2;
-            } else {
-                return "BOOK."+id1;
-            }
-        } catch (Exception e) {
-            throw new Exception("calcLegalisName: "+null);
-        }
-    }
-
-    private int getId2(ResultSet rs, int id1) throws Exception {
-        rs.getString(2);
-        if (!rs.wasNull()) {
-            try {
-                int i = rs.getInt(2);
-                if (id1==i) {
-                    return -1;
-                }
-                return i;
-            } catch (Exception e) {
-
-            }
-        }
-        return -1;
-    }
-
-    private int getId1(ResultSet rs) throws Exception {
-        try {
-             return rs.getInt(1);
-        } catch (Exception e) {
-            //205113645_srodtyt3
-            return Integer.parseInt(rs.getString(1).substring(0, rs.getString(1).indexOf('_')-1));
-        }
-    }
 
 
-    public void flushCoor(IntArrayList corr) {
+    public void flushCoor(LongArrayList corr) {
         if (uniqIds.lastCoor>-1) {
             corr.add(uniqIds.lastCoor);
         }
@@ -213,11 +172,11 @@ public class HistoryLoader {
         uniqIds.exportsInSeq=0;
     }
 
-    public void registerSeq(IntArrayList corr) {
+    public void registerSeq(LongArrayList corr) {
         if (corr.size()>registerSeqTresh) {
             if (uniqIds.exportsInSeq<exportsInSeqTresh) {
                 StringBuffer buf = new StringBuffer();
-                for (Integer xx : corr) {
+                for (Long xx : corr) {
                     buf.append(xx+",");
                 }
                 regSeq.add(buf.toString());
@@ -229,7 +188,7 @@ public class HistoryLoader {
         }
     }
 
-    public void addCoor(IntArrayList corr, int pId, boolean export) {
+    public void addCoor(LongArrayList corr, long pId, boolean export) {
         if (uniqIds.lastCoor>-1) {
             corr.add(uniqIds.lastCoor);
         }
@@ -241,7 +200,7 @@ public class HistoryLoader {
         }
     }
 
-    public void addCoorSkipLast(IntArrayList corr, int pId, boolean export) {
+    public void addCoorSkipLast(LongArrayList corr, long pId, boolean export) {
         uniqIds.lastCoor=pId;
         if (export) {
             corr.add(uniqIds.lastCoor);
